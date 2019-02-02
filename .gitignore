@@ -1,0 +1,19 @@
+# datafile
+*.csv
+*.xls
+
+# example data
+data/ml-100k/
+
+
+# pycharm config file
+*.idea
+
+# Auto-generated .pyc folders
+__pycache__/
+FF/__pycache__/
+FFM/__pycache__/
+
+# pyc file
+*.pyc
+
