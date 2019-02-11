@@ -15,6 +15,7 @@ if __name__ == '__main__':
 
     data = DataReader('../data/ml-100k/u.data')
     x, y = data.input(**param)
+    print(x.shape)
 
     x_train, x_test, y_train, y_test = train_test_split(x, y)
     x_valid, x_test, y_valid, y_test = train_test_split(x_test, y_test)
