@@ -12,8 +12,7 @@ if __name__ == '__main__':
         'cols': ['user', 'item', 'score', 'timestamp'],
         'discrete_col': ['user', 'item'],
         'unusecol': ['timestamp'],
-        'batch_size': 64
+        'batch_size': 4
     }
     data = LoadData(**param)
-    x = data.input()
-    print(x.shape)
+    data_generator = data.batchload()

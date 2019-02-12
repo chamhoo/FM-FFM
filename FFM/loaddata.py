@@ -3,6 +3,7 @@
 
 """
 import numpy as np
+import time
 
 
 class LoadData(object):
@@ -25,6 +26,8 @@ class LoadData(object):
         self.targetdict = dict()
         self.target_nunique = 0
         self.fieldlen = dict(zip(self.usecol, [0 for i in self.usecol]))
+        self.field_start = dict()
+        self.feature_len = 0
 
     def preload(self):
         """
@@ -54,7 +57,7 @@ class LoadData(object):
 
                     if field in self.numerical_col:
                         self.ledict[field] = 0
-                        self.fieldlen[field] = 0
+                        self.fieldlen[field] = 1
 
                     if field in self.discrete_col:
                         isexit = self.ledict[field].get(feature, False)
@@ -66,47 +69,54 @@ class LoadData(object):
                     i += 1
                 self.len += 1
 
-    def batchread(self):
+    def convert_line(self, line):
+        x = np.zeros([self.feature_len])
+        for i in range(len(line)):
+            field = self.cols[i]
+
+            if field in self.discrete_col:
+                dis_feature_idx = self.field_start[field] + self.ledict[field][line[i]]
+                x[dis_feature_idx] = 1
+
+            if field in self.numerical_col:
+                num_feature_idx = self.field_start[field]
+                x[num_feature_idx] = line[i]
+
+            if field in self.targetcol:
+                if self.target_type == 'numberical':
+                    y = line[i]
+                if self.target_type == 'discrete':
+                    y = self.targetdict[line[i]]
+
+            if field in self.unusecol:
+                pass
+
+        return x, y
+
+    def batchload(self):
+        self.preload()
+        x = []
+        y = []
+        i = 0
         filelen = 0
-        batch_list = []
+
+        for key, value in self.fieldlen.items():
+            self.feature_len += value
+            print(self.fieldlen)
+            self.field_start[key] = i
+            i += value
+
         with open(self.path) as file:
             for line in file.readlines():
-                batch_list += line.strip().split()
+                line = line.strip().split()
+                line_x, line_y = self.convert_line(line)
+                x.append(line_x)
+                y.append(line_y)
                 filelen += 1
-                if (filelen % self.batch_size == 0) & (filelen == self.len):
-                    yield batch_list
-                    batch_list = []
-
-    def input(self):
-        self.preload()
-        feature_len = 0
-        field_start = dict(); i = 0
-        for key,value in self.fieldlen.items():
-            feature_len += value + 1
-            field_start[key] = i
-            i += value + 1
-
-        for batch_list in self.batchread():
-            collen = len(self.usecol)
-            rowlen = len(batch_list) / len(self.usecol)
-            x = np.zeros([rowlen, feature_len])
-            y = np.array([])
-            col_list = self.cols * rowlen
-            row_list = np.hstack([[i]*collen for i in range(rowlen)]).tolist()
-            for i in len(batch_list):
-                if col_list[i] in self.unusecol:
-                    pass
-                if col_list[i] in self.targetcol:
-                    if self.target_type == 'numberical':
-                        y = np.append(y, batch_list[i])
-                    if self.target_type == 'discrete':
-                        y = np.append(y, self.targetdict[batch_list[i]])
-                if col_list[i] in self.numerical_col:
-                    x[row_list[i], field_start[col_list[i]]] = batch_list[i]
-                if col_list[i] in self.discrete_col:
-                    x[row_list[i], field_start[col_list[i]]+self.ledict[col_list[i]][batch_list]] = 1
-                    print(y)
-        return x, y
+                if (filelen % self.batch_size == 0) or (filelen == self.len):
+                    yield np.array(x), np.array(y)
+                    x = []
+                    y = []
 
 
 
