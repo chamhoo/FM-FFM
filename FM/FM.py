@@ -4,24 +4,19 @@ import tensorflow as tf
 
 class FM(object):
     def __init__(self):
-        self.x_train = None
-        self.x_test = None
-        self.y_train = None
-        self.y_test = None
-        self.row = 100
+        self.train_generator = None
+        self.test_generator = None
         self.col = 100
+        self.row = 100
 
-    def traindata(self, x, y):
-        self.x_train = x
-        self.y_train = y[:, np.newaxis]
-        self.row, self.col = self.x_train.shape
+    def info_reseive(self, col):
+        self.col = col
 
-    def validdata(self, x, y):
-        self.x_test = x
-        self.y_test = y[:, np.newaxis]
+    def traindata(self, train):
+        self.train_generator = train
 
-    def predictdata(self, x):
-        self.x_predict = x
+    def predictdata(self, test):
+        self.test_generator = test
 
     def metrics_function(self, function_name):
         if function_name == 'mse':
@@ -72,43 +67,64 @@ class FM(object):
 
     def cal_score(self, x, y):
         score = 0
-        num = x.shape[0]
-        steps = int(np.ceil(num / self.batch_size))
-        for i in range(steps):
-            start = (i * self.batch_size) % num
-            end = min(start + self.batch_size, num)
-            size = end - start
-            score += self.sess.run(self.metrics, feed_dict={self.x: x[start: end],
-                                                        self.y: y[start: end]}) * size
-        score = score / num
+        score += self.sess.run(self.metrics, feed_dict={self.x: x,
+                                                        self.y: y})
         return score
 
-    def train(self, epochs=10, batch_size=1000):
-        self.epochs = epochs
-        self.batch_size = batch_size
-        STEPS = int(np.ceil(self.row / self.batch_size)*self.epochs)
+    def random_split(self, percentage=80):
+        while True:
+            rand = np.random.randint(0, 100, 1)
+            if percentage > rand:
+                yield True
+            else:
+                yield False
+
+    def blank(self):
+        self.train_num = 0
+        self.valid_num = 0
+        self.trainscore = 0
+        self.validscore = 0
+
+    def print_score(self, epoch):
+        print(f'After {epoch} epoch, '
+              f'Training score is {round(self.trainscore / self.train_num, 2)}, '
+              f'valid score is {round(self.validscore / self.valid_num, 2)}')
+
+    def train(self):
+        rand = self.random_split()
 
         self.sess = self.session()
         self.sess.run(tf.global_variables_initializer())
 
-        i = 0; num_epoch =1; end=0; print('Beginning...')
-        for i in range(STEPS):
-            start = (i * self.batch_size) % self.row
-            if end == self.row:
-                start = 0
-            end = min(start+self.batch_size, self.row)
-            self.sess.run(self.train_opt,feed_dict={self.x: self.x_train[start: end],
-                                                    self.y: self.y_train[start: end]})
-            if end == self.batch_size:
-                trainscore = self.cal_score(self.x_train, self.y_train)
-                validscore = self.cal_score(self.x_test, self.y_test)
-                print(f'After {num_epoch} epoch, '
-                      f'Training score is {round(trainscore, 2)}, '
-                      f'valid score is {round(validscore, 2)}')
-                num_epoch += 1
+        print('Beginning...')
+
+        last_epoch = 0
+        self.blank()
+
+        for x, y, epoch in self.train_generator:
+            if next(rand):
+                self.sess.run(self.train_opt,feed_dict={self.x: x,
+                                                        self.y: y})
+                sector_len = len(x)
+                self.trainscore += self.cal_score(x, y) * sector_len
+                self.train_num += sector_len
+            else:
+                sector_len = len(x)
+                self.validscore += self.cal_score(x, y) * sector_len
+                self.valid_num += sector_len
+
+            if last_epoch != epoch:
+                self.print_score(epoch)
+                self.blank()
+            last_epoch = epoch
+
+        self.print_score(epoch+1)
 
     def predict(self):
-        return self.sess.run(self.y_predict, feed_dict={self.x: self.x_predict})[:, 0]
+        y_predict = []
+        for x in self.test_generator:
+            y_predict.append(self.sess.run(self.y_predict, feed_dict={self.x: x})[:, 0])
+        return np.array(y_predict)
 
     def close(self):
         self.sess.close()

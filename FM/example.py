@@ -1,4 +1,3 @@
-from sklearn.model_selection import train_test_split
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -6,27 +5,32 @@ from loaddata import *
 from FM import *
 
 if __name__ == '__main__':
-    param = {
+    BATCH_SIZE = 32
+    EPOCH = 3
+
+    data_param = {
+        'trainpath': '../data/ml-100k/u.data',
+        'testpath': '../data/ml-100k/u5.test',
+        'targetcol': 'score',
+        'target_type': 'numberical',
         'cols': ['user', 'item', 'score', 'timestamp'],
-        'targetcol': ['score'],
+        'discrete_col': ['user', 'item'],
         'unusecol': ['timestamp'],
-        'discrete_col': ['user', 'item']
+        'batch_size': BATCH_SIZE
     }
 
-    data = DataReader('../data/ml-100k/u.data')
-    x, y = data.input(**param)
-    print(x.shape)
+    input = LoadData(**data_param)
+    train = input.data_generator('train', epoch=EPOCH)
+    test = input.data_generator('test')
+    feature_num = input.feature_num()
 
-    x_train, x_test, y_train, y_test = train_test_split(x, y)
-    x_valid, x_test, y_valid, y_test = train_test_split(x_test, y_test)
-    del x, y
     try:
         fm = FM()
-        fm.traindata(x_train, y_train)
-        fm.validdata(x_valid, y_valid)
-        fm.predictdata(x_test)
+        fm.traindata(train)
+        fm.predictdata(test)
+        fm.info_reseive(col=feature_num)
         fm.model(k=10, l2=0., learning_rate=0.01, loss_name='mse')
-        fm.train(epochs=3,batch_size=128)
+        fm.train()
         y_pre = fm.predict()
     finally:
         fm.close()
