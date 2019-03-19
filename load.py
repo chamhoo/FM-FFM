@@ -6,14 +6,31 @@ and statistics basic information, such as the number of rows, before the file wa
 The benefits of this treatment are:
 1. Save memory, because the preloading uses Label-Encoder,
  so the loading process can take up very little memory.
-2. Very fast, We will compress the time of loading data as much as possible,
+2. Very fast, We will compress the time of loading data as much as possible.
+
+Input parameter description:
+trainpath - Training data path
+testpath - Test data path
+target_type - 'discrete' or 'numerical'
+targetcol - The name of the target column
+split_percentage - The training set accounts for the proportion of the total input samples,
+                   and we will divide the training set and validation set accordingly.
+batch_size - batch-size
+numerical_col - List of column names of all numerical data
+cols - List of column names of all data
+discrete_col - List of column names of all discrete data
+multi_dis_col - List of column names of all multi-discrete data
+uselesscol - List of column names of all useless data
 
 Warning: The loaded csv file needs to meet a certain format:
 the delimiter must be different from the multi-valued discrete field.
 
 author: leechh
 """
+
+
 import numpy as np
+from time import time
 
 
 class LoadData(object):
@@ -22,11 +39,13 @@ class LoadData(object):
                  testpath,
                  target_type,
                  targetcol,
+                 delimiter,
                  split_percentage=100,
                  batch_size=64,
                  numerical_col=[],
-                 cols=[], discrete_col=[], multi_dis_col=[], unusecol=[]):
+                 cols=[], discrete_col=[], multi_dis_col=[], uselesscol=[]):
 
+        self.delimiter = delimiter
         self.seed = np.random.randint(0, 200, 1)[0]
         self.batch_size = batch_size
         self.split_percentage = split_percentage
@@ -35,7 +54,7 @@ class LoadData(object):
         self.targetcol = targetcol
         self.discrete_col = discrete_col
         self.multi_dis_col = multi_dis_col
-        self.unusecol = unusecol
+        self.uselesscol = uselesscol
         self.usecol = self.discrete_col + self.numerical_col + self.multi_dis_col
 
         self.ledict = dict(zip(self.usecol, [dict() for i in self.usecol]))
@@ -54,23 +73,29 @@ class LoadData(object):
         self.y = []
         self.maxlen = 0
 
+        testcols = cols.copy()
+        testcols.remove(self.targetcol)
+
         self.datainfo = {
             'train': {'path': trainpath, 'cols': cols, 'len': 0},
-            'test':{'path': testpath, 'cols': list(set(cols) - set(targetcol)), 'len': 0}
+            'test': {'path': testpath, 'cols': testcols, 'len': 0}
         }
         self._preload()
 
     def reset_seed(self, seed):
+        """
+        You can set the seed to a fixed value.
+        """
         self.seed = seed
 
     def _preload(self):
-        for subtype in ['train', 'test']:
+        for _type in ['train', 'test']:
 
-            with open(self.datainfo[subtype]['path']) as file:
+            with open(self.datainfo[_type]['path']) as file:
                 for line in file.readlines():
-                    line = line.split(',')
+                    line = line.strip().split(self.delimiter['field'])
                     for idx in range(len(line)):
-                        field = self.datainfo[subtype]['cols'][idx]
+                        field = self.datainfo[_type]['cols'][idx]
 
                         if field in self.numerical_col:
                             self.ledict[field][field] = 0
@@ -84,13 +109,13 @@ class LoadData(object):
 
                         elif field in self.multi_dis_col:
                             self.multi_max[field] = max(self.multi_max[field], len(line[idx]))
-                            for i in line[idx].replace(' ', '').split(';'):
+                            for i in line[idx].replace(' ', '').split(self.delimiter['multi']):
                                 is_exit = self.ledict[field].get(i, False)
                                 if is_exit is False:
                                     self.ledict[field][i] = self.fieldlen[field]
                                     self.fieldlen[field] += 1
 
-                        elif field == self.targetcol:
+                        elif field is self.targetcol:
                             if self.target_type == 'discrete':
                                 isexit = self.targetdict.get(line[idx], False)
                                 if isexit is False:
@@ -99,85 +124,112 @@ class LoadData(object):
 
                         else:
                             pass
-                    self.datainfo[subtype]['len'] += 1
+                    self.datainfo[_type]['len'] += 1
 
         i = 0
         for key, value in self.fieldlen.items():
-            self.num_feature += value
             self.field_start[key] = i
+            self.num_feature += value
             i += value
 
-    def col_transform(self, filelen, line, subtype):
+    def _col_transform(self, filelen, line, subtype):
         for i in range(len(line)):
             field = self.datainfo[subtype]['cols'][i]
-            field_index = self.usecol.index(field)
 
             if field in self.numerical_col:
+                field_index = self.usecol.index(field)
                 self.idx.append([filelen, field_index, 0])
-                self.x_idx.append(self.ledict[field][field] + self.field_start[field])
+                self.x_idx.append(int(self.ledict[field][field] + self.field_start[field]))
                 self.x_val.append(float(line[i]))
 
-            if field in self.discrete_col:
+            elif field in self.discrete_col:
+                field_index = self.usecol.index(field)
                 self.idx.append([filelen, field_index, 0])
-                self.x_idx.append(self.ledict[field][line[i]] + self.field_start[field])
+                self.x_idx.append(int(self.ledict[field][line[i]] + self.field_start[field]))
                 self.x_val.append(1)
 
-            if field in self.multi_dis_col:
+            elif field in self.multi_dis_col:
                 num = 0
+                field_index = self.usecol.index(field)
                 field_keys = self.ledict[field].keys()
                 multi_count = dict(zip(field_keys, np.zeros(len(field_keys))))
-                for sub in line[i].replace(' ', '').split(';'):
+                for sub in line[i].replace(' ', '').split(self.delimiter['multi']):
                     multi_count[sub] += 1
-                for keys, value in multi_count:
+                for keys, value in multi_count.items():
                     if value != 0:
                         self.idx.append([filelen, field_index, num])
-                        self.x_idx.append(self.ledict[field][keys] + self.field_start[field])
+                        self.x_idx.append(int(self.ledict[field][keys] + self.field_start[field]))
                         self.x_val.append(value)
                         num += 1
                 self.maxlen = max(num, self.maxlen)
 
-            if field in self.targetcol:
+            elif field in self.targetcol:
                 if self.target_type == 'discrete':
-                    self.y.append(self.targetdict[line[i]])
+                    target_array = np.zeros(self.target_nunique)
+                    target_array[self.targetdict[line[i]]] = 1
+                    self.y.append(target_array)
                 else:
                     self.y.append(line[i])
 
-    def random_split(self):
-        np.random.seed(self.seed)
-        for rand in np.random.randint(0, 100, int(1e+7)):
-            yield rand
+            else:
+                pass
 
-    def data_generator(self, subtype, istrain):
-        filelen = 0
-        iterations = 0
-        istrue = self.random_split()
-        with open(self.datainfo[subtype]['path']) as file:
-            for line in file.readlines():
-                iterations += 1
+    def _random_split(self):
+        """
+        Linear congruential generator
+        - https://en.wikipedia.org/wiki/Linear_congruential_generator
+        """
+        m = 2**32
+        seed = self.seed
+        for i in range(m):
+            nextseed = (214013*seed + 2531011) % m
+            pp = (self.split_percentage / 100) > (nextseed / m)
+            yield pp
+            seed = nextseed
 
-                if (istrain == (self.split_percentage > next(istrue))) & (subtype == 'train'):
-                    line = line.split(',')
-                    self.col_transform(filelen, line, subtype)
-                    filelen += 1
 
-                    if (filelen % self.batch_size == 0) or (iterations == self.datainfo[subtype]['len']):
-                        idx_array = np.zeros([filelen, len(self.usecol), self.maxlen])
+    def data_generator(self, dataset_type):
+        """
+        :param dataset_type: 'train', 'valid' or 'test'
+        :return: a dataset generator of this data type
+        """
+        batch_idx = 0
+        size = 0
+        split = self._random_split()
+
+        if dataset_type in ['train', 'valid']:
+            _type = 'train'
+        else:
+            _type = 'test'
+
+        with open(self.datainfo[_type]['path']) as file:
+            for line in file:
+                size += 1
+                if ((dataset_type == 'train') == next(split)) or (dataset_type is 'test'):
+                    line = line.strip().split(self.delimiter['field'])
+                    self._col_transform(batch_idx, line, _type)
+                    batch_idx += 1
+
+                    if (batch_idx == self.batch_size) or (size == self.datainfo[_type]['len']):
+                        idx_array = np.zeros([batch_idx, len(self.usecol), self.maxlen+1])
                         val_array = idx_array.copy()
+
                         for i, [x, y, z] in enumerate(self.idx):
                             idx_array[x, y, z] = self.x_idx[i]
                             val_array[x, y, z] = self.x_val[i]
 
-                        if subtype == 'train':
-                            yield idx_array, val_array, self.y
+                        if _type == 'train':
+                            yield idx_array, val_array, np.array(self.y)
                         else:
                             yield idx_array, val_array
 
                         del idx_array, val_array
-                        self.idx = []
-                        self.x_idx = []
-                        self.x_val = []
-                        self.y = []
+                        self.idx.clear()
+                        self.x_idx.clear()
+                        self.x_val.clear()
+                        self.y.clear()
                         self.maxlen = 0
-                        filelen = 0
+                        batch_idx = 0
+
 
 

@@ -4,6 +4,9 @@
 
 # example data
 data/ml-100k/
+data/elo/
+
+# jupyter support file
 
 
 # pycharm config file
