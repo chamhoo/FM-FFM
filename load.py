@@ -219,9 +219,9 @@ class LoadData(object):
                             val_array[x, y, z] = self.x_val[i]
 
                         if _type == 'train':
-                            yield idx_array, val_array, np.array(self.y)
+                            yield idx_array, val_array, np.array(self.y), batch_idx
                         else:
-                            yield idx_array, val_array
+                            yield idx_array, val_array, batch_idx
 
                         del idx_array, val_array
                         self.idx.clear()

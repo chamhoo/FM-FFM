@@ -44,11 +44,10 @@ class CTR(LoadData):
         else:
             assert False, 'optimizer name is not exit'
 
-    def FM(self, k=10, l2=0., learning_rate=0.01, loss='mse', optimizer='gd', early_stopping=False):
+    def FM(self, k=10, l2=0., learning_rate=0.01, loss='mse', optimizer='gd'):
         # assert
         assert type(k) is int, 'The type of k must be int'
         assert 0. <= l2 <= 1., 'l2 must be in [0, 1]'
-        assert type(early_stopping) is bool, 'early_stopping in [False, True]'
 
         # Input Parameter
         self.k = k
@@ -56,7 +55,6 @@ class CTR(LoadData):
         self.loss = loss
         self.optimizer = optimizer
         self.learning_rate = learning_rate
-        self.early_stopping = early_stopping
 
         # Input
         self.idx = tf.placeholder('float', [None, self.usecol, None])  # [len, field, max_count]
@@ -70,28 +68,21 @@ class CTR(LoadData):
 
         # Linear
         embedding_w1 = tf.nn.embedding_lookup(self.w1, self.idx)   # [len, field, max_count, 1]
-        self.linear = tf.multiply(embedding_w1, self.val)
+        self.linear = tf.reduce_sum(tf.multiply(embedding_w1, self.val), [1, 2])  # [len, 1]
 
         # pair
         embedding_v = tf.nn.embedding_lookup(self.v, self.idx)  # [len, field, max_count, k]
         pow_multiply = tf.reduce_sum(tf.multiply(tf.pow(embedding_v, 2), tf.pow(self.val, 2)), [1,2])  # [len ,k]
-        multiply_pow = tf.reduce_sum(tf.multiply(embedding_v, self.val))
-        self.pair = 0.5 * tf.reduce_sum(tf.subtract(tf.pow(, 2), ), axis=1, keep_dims=True) # [len, 1]
-
-        self.pair = 0.5 * tf.reduce_sum(
-            tf.subtract(
-                tf.pow(tf.matmul(self.x,tf.transpose(self.v)),2),
-                tf.matmul(tf.pow(self.x,2),tf.transpose(tf.pow(self.v,2)))
-            ), axis=1, keep_dims=True)
+        multiply_pow = tf.pow(tf.reduce_sum(tf.multiply(embedding_v, self.val), [1, 2]), 2)  # [len, k]
+        self.pair = 0.5 * tf.reduce_sum(tf.subtract(multiply_pow, pow_multiply), axis=1, keep_dims=True)  # [len, 1]
 
         self.y_predict = tf.add(self.linear, self.pair)
-
         self.metrics = self.metrics_function(self.loss)
 
+        # l2
         lambda_w1 = tf.constant(self.l2, name='lambda_w1')
         lambda_v = tf.constant(self.l2, name='lambda_v')
 
-        # l2
         l2_regularation = tf.reduce_sum(
             tf.add(
                 tf.multiply(lambda_w1, self.w1),
@@ -100,10 +91,10 @@ class CTR(LoadData):
         )
 
         # loss & optimizer
-        final_loss = tf.add(self.loss, l2_regularation)
+        final_loss = tf.add(self.metrics, l2_regularation)
         self.optimizer_function(final_loss)
 
-    def session(self):
+    def _session(self):
         config = tf.ConfigProto(device_count={"gpu": 0})
         config.gpu_options.allow_growth = True
         return tf.Session(config=config)
@@ -114,28 +105,63 @@ class CTR(LoadData):
                                                         self.y: y})
         return score
 
-
     def print_score(self, epoch):
         print(f'After {epoch} epoch, '
               f'Training score is {round(self.trainscore / self.train_num, 2)}, '
               f'valid score is {round(self.validscore / self.valid_num, 2)}')
 
-    def train(self):
-        self.sess = self.session()
+    def blank_score(self):
+        self.train_score = 0
+        self.valid_score = 0
+        self.train_len = 0
+        self.valid_len = 0
+
+    def train(self, epoch, early_stopping):
+        assert type(epoch) is int, 'The type of epoch is int'
+        assert type(early_stopping) is bool, 'early_stopping in [False, True]'
+
+        last_score = 0
+        self.epoch = epoch
+        self.early_stopping = early_stopping
+        self.blank_score()
+
+        self.sess = self._session()
         self.sess.run(tf.global_variables_initializer())
 
         if 1 - os.path.exists('.checkpoint'):
             os.mkdir('.checkpoint')
 
         print('Beginning...')
+        for num_epoch in range(self.epoch):
+            for idx, val, y, batch_size in self.data_generator('train'):  # idx, val: [len, field, max_count]
+                self.train_len += batch_size
+                feed_dict = {
+                    self.idx: idx,
+                    self.val: val[:, :, :, np.newaxis],
+                    self.y: y
+                }
+                self.sess.run(self.train_opt, feed_dict=feed_dict)
+                self.train_score += self.sess.run(self.metrics, feed_dict=feed_dict) * batch_size
+            self.train_score = self.train_score / self.train_len
 
-        for idx, val, y in self.data_generator('train'): # idx, val: [len, field, max_count]
-            feed_dict = {
-                self.idx: idx,
-                self.val: val[:, :, :, np.newaxis],
-                self.y: y
-            }
-            self.sess.run(self.train_opt, feed_dict=feed_dict)
+            for idx, val, y, batch_size in self.data_generator('valid'):
+                self.valid_len += batch_size
+                feed_dict = {
+                    self.idx: idx,
+                    self.val: val[:, :, :, np.newaxis],
+                    self.y: y
+                }
+                self.valid_score += self.sess.run(self.metrics, feed_dict=feed_dict) * batch_size
+            self.valid_score = self.valid_score / self.train_len
+
+            # print score
+            print(f'After {num_epoch} epoch,'
+                  f' train score is {self.train_score}, '
+                  f'valid score is {self.valid_score}')
+
+            # save & early stopping
+
+
 
         shutil.rmtree('.checkpoint')
 
