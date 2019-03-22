@@ -34,16 +34,17 @@ from time import time
 
 
 class LoadData(object):
-    def __init__(self,
-                 trainpath,
-                 testpath,
-                 target_type,
-                 targetcol,
-                 delimiter,
-                 split_percentage=100,
-                 batch_size=64,
-                 numerical_col=[],
-                 cols=[], discrete_col=[], multi_dis_col=[], uselesscol=[]):
+
+    def load_param(self,
+                   trainpath,
+                   testpath,
+                   target_type,
+                   targetcol,
+                   delimiter,
+                   split_percentage=100,
+                   batch_size=64,
+                   numerical_col=[],
+                   cols=[], discrete_col=[], multi_dis_col=[], uselesscol=[]):
 
         self.delimiter = delimiter
         self.seed = np.random.randint(0, 200, 1)[0]
@@ -71,7 +72,7 @@ class LoadData(object):
         self.x_idx = []
         self.x_val = []
         self.y = []
-        self.maxlen = 0
+        self.maxlen = 1
 
         testcols = cols.copy()
         testcols.remove(self.targetcol)
@@ -139,13 +140,13 @@ class LoadData(object):
             if field in self.numerical_col:
                 field_index = self.usecol.index(field)
                 self.idx.append([filelen, field_index, 0])
-                self.x_idx.append(int(self.ledict[field][field] + self.field_start[field]))
-                self.x_val.append(float(line[i]))
+                self.x_idx.append(self.ledict[field][field] + self.field_start[field])
+                self.x_val.append(line[i])
 
             elif field in self.discrete_col:
                 field_index = self.usecol.index(field)
                 self.idx.append([filelen, field_index, 0])
-                self.x_idx.append(int(self.ledict[field][line[i]] + self.field_start[field]))
+                self.x_idx.append(self.ledict[field][line[i]] + self.field_start[field])
                 self.x_val.append(1)
 
             elif field in self.multi_dis_col:
@@ -158,7 +159,7 @@ class LoadData(object):
                 for keys, value in multi_count.items():
                     if value != 0:
                         self.idx.append([filelen, field_index, num])
-                        self.x_idx.append(int(self.ledict[field][keys] + self.field_start[field]))
+                        self.x_idx.append(self.ledict[field][keys] + self.field_start[field])
                         self.x_val.append(value)
                         num += 1
                 self.maxlen = max(num, self.maxlen)
@@ -169,7 +170,7 @@ class LoadData(object):
                     target_array[self.targetdict[line[i]]] = 1
                     self.y.append(target_array)
                 else:
-                    self.y.append(line[i])
+                    self.y.append([line[i]])
 
             else:
                 pass
@@ -211,8 +212,9 @@ class LoadData(object):
                     batch_idx += 1
 
                     if (batch_idx == self.batch_size) or (size == self.datainfo[_type]['len']):
-                        idx_array = np.zeros([batch_idx, len(self.usecol), self.maxlen+1])
-                        val_array = idx_array.copy()
+                        array_size = [batch_idx, len(self.usecol), self.maxlen]
+                        idx_array = np.zeros(array_size, dtype=int)
+                        val_array = np.zeros(array_size, dtype=float)
 
                         for i, [x, y, z] in enumerate(self.idx):
                             idx_array[x, y, z] = self.x_idx[i]
@@ -228,7 +230,7 @@ class LoadData(object):
                         self.x_idx.clear()
                         self.x_val.clear()
                         self.y.clear()
-                        self.maxlen = 0
+                        self.maxlen = 1
                         batch_idx = 0
 
 
