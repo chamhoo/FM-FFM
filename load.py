@@ -8,7 +8,7 @@ The benefits of this treatment are:
  so the loading process can take up very little memory.
 2. Very fast, We will compress the time of loading data as much as possible.
 
-Input parameter description:
+load parameter description:
 trainpath - Training data path
 testpath - Test data path
 target_type - 'discrete' or 'numerical'
@@ -41,13 +41,13 @@ class LoadData(object):
                    target_type,
                    targetcol,
                    delimiter,
+                   numerical_col,
+                   cols, discrete_col, multi_dis_col, uselesscol,
                    split_percentage=100,
-                   batch_size=64,
-                   numerical_col=[],
-                   cols=[], discrete_col=[], multi_dis_col=[], uselesscol=[]):
+                   batch_size=64,):
 
         self.delimiter = delimiter
-        self.seed = np.random.randint(0, 200, 1)[0]
+        self.seed = 16843009
         self.batch_size = batch_size
         self.split_percentage = split_percentage
         self.target_type = target_type
@@ -93,7 +93,7 @@ class LoadData(object):
         for _type in ['train', 'test']:
 
             with open(self.datainfo[_type]['path']) as file:
-                for line in file.readlines():
+                for line in file:
                     line = line.strip().split(self.delimiter['field'])
                     for idx in range(len(line)):
                         field = self.datainfo[_type]['cols'][idx]
@@ -175,7 +175,7 @@ class LoadData(object):
             else:
                 pass
 
-    def _random_split(self):
+    def _pseudo_random(self, a, b, isbool):
         """
         Linear congruential generator
         - https://en.wikipedia.org/wiki/Linear_congruential_generator
@@ -183,9 +183,11 @@ class LoadData(object):
         m = 2**32
         seed = self.seed
         for i in range(m):
-            nextseed = (214013*seed + 2531011) % m
-            pp = (self.split_percentage / 100) > (nextseed / m)
-            yield pp
+            nextseed = (a*seed + b) % m
+            if isbool:
+                yield (self.split_percentage / 100) > (nextseed / m)
+            else:
+                yield nextseed
             seed = nextseed
 
 
@@ -196,7 +198,7 @@ class LoadData(object):
         """
         batch_idx = 0
         size = 0
-        split = self._random_split()
+        split = self._pseudo_random(214013, 2531011, True)
 
         if dataset_type in ['train', 'valid']:
             _type = 'train'
@@ -211,27 +213,27 @@ class LoadData(object):
                     self._col_transform(batch_idx, line, _type)
                     batch_idx += 1
 
-                    if (batch_idx == self.batch_size) or (size == self.datainfo[_type]['len']):
-                        array_size = [batch_idx, len(self.usecol), self.maxlen]
-                        idx_array = np.zeros(array_size, dtype=int)
-                        val_array = np.zeros(array_size, dtype=float)
+                if (batch_idx == self.batch_size) or (size == self.datainfo[_type]['len']):
+                    array_size = [batch_idx, len(self.usecol), self.maxlen]
+                    idx_array = np.zeros(array_size, dtype=int)
+                    val_array = np.zeros(array_size, dtype=float)
 
-                        for i, [x, y, z] in enumerate(self.idx):
-                            idx_array[x, y, z] = self.x_idx[i]
-                            val_array[x, y, z] = self.x_val[i]
+                    for i, [x, y, z] in enumerate(self.idx):
+                        idx_array[x, y, z] = self.x_idx[i]
+                        val_array[x, y, z] = self.x_val[i]
 
-                        if _type == 'train':
-                            yield idx_array, val_array, np.array(self.y), batch_idx
-                        else:
-                            yield idx_array, val_array, batch_idx
+                    if _type == 'train':
+                        yield idx_array, val_array, np.array(self.y), batch_idx
+                    else:
+                        yield idx_array, val_array, batch_idx
 
-                        del idx_array, val_array
-                        self.idx.clear()
-                        self.x_idx.clear()
-                        self.x_val.clear()
-                        self.y.clear()
-                        self.maxlen = 1
-                        batch_idx = 0
+                    del idx_array, val_array
+                    self.idx.clear()
+                    self.x_idx.clear()
+                    self.x_val.clear()
+                    self.y.clear()
+                    self.maxlen = 1
+                    batch_idx = 0
 
 
 
