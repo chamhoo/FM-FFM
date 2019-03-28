@@ -1,6 +1,0 @@
-model_checkpoint_path: "model.ckpt"
-all_model_checkpoint_paths: "../epoch275/model.ckpt"
-all_model_checkpoint_paths: "../epoch276/model.ckpt"
-all_model_checkpoint_paths: "../epoch277/model.ckpt"
-all_model_checkpoint_paths: "../epoch278/model.ckpt"
-all_model_checkpoint_paths: "model.ckpt"
