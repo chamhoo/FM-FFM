@@ -5,55 +5,15 @@ import tensorflow as tf
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = '3'
 
 from model import *
+from plot import *
 
 
 class CTR(Model):
 
-    def metrics_function(self, function_name):
-        """
-        Lower is better
-        """
-        if function_name == 'mse':
-            return tf.reduce_mean(tf.square(self.tensor_y - self.y_predict))
-        elif function_name == 'rmse':
-            return tf.sqrt(tf.reduce_mean(tf.square(self.tensor_y - self.y_predict)))
-        else:
-            assert False, 'metrics name is not exit'
-
-    def optimizer_function(self, loss):
-        if self.optimizer == 'adam':
-            self.train_opt = tf.train.AdamOptimizer(
-                learning_rate=self.learning_rate,
-                beta1=0.9,
-                beta2=0.999,
-                epsilon=1e-8
-            ).minimize(loss)
-
-        elif self.optimizer == 'adagrad':
-            self.train_opt = tf.train.AdagradOptimizer(
-                learning_rate=self.learning_rate,
-                initial_accumulator_value=1e-8
-            ).minimize(loss)
-
-        elif self.optimizer == 'gd':
-            self.train_opt = tf.train.GradientDescentOptimizer(
-                learning_rate=self.learning_rate
-            ).minimize(loss)
-
-        elif self.optimizer == 'momentun':
-            self.train_opt = tf.train.MomentumOptimizer(
-                learning_rate=self.learning_rate,
-                momentum=0.95
-            ).minimize(loss)
-
-        else:
-            assert False, 'optimizer name is not exit'
-
-
     def _session(self):
-        # config = tf.ConfigProto(device_count={"gpu": 0})
-        # config.gpu_options.allow_growth = True
-        return tf.Session(graph=self.graph)
+        config = tf.ConfigProto(device_count={"gpu": 0})
+        config.gpu_options.allow_growth = True
+        return tf.Session(graph=self.graph, config=config)
 
     def _blank_score(self):
         self.train_score = 0
@@ -86,12 +46,7 @@ class CTR(Model):
         assert type(early_stopping_epoch) is int, 'The type of early_stopping_epoch is int'
         assert type(retrain) is bool, 'The type of retrain is bool'
 
-        # input Parameter
-        self.epoch = epoch
-        self.early_stopping = early_stopping
-        self.verbose = verbose
-        self.early_stopping_epoch = early_stopping_epoch
-
+        best_epoch = 0
         start_epoch = 1
         error_rise_count = 0
         recorder = {'train_score': [], 'valid_score': []}
@@ -108,7 +63,7 @@ class CTR(Model):
             if 1 - os.path.exists('.checkpoint'):
                 os.mkdir('.checkpoint')
 
-            for num_epoch in range(start_epoch, start_epoch+self.epoch):
+            for num_epoch in range(start_epoch, start_epoch+epoch):
                 self._blank_score()
                 for idx, val, y, batch_size in self.data_generator('train'):  # idx, val: [len, field, max_count]
                     self.train_len += batch_size
@@ -131,24 +86,24 @@ class CTR(Model):
                 recorder['valid_score'].append(self.valid_score)
 
                 # print score
-                if self.verbose == 2:
+                if verbose == 2:
                     print(f'After {num_epoch} epoch,'
                           f' train score is {round(self.train_score, 4)}, '
                           f'valid score is {round(self.valid_score, 4)}')
 
                 # save & early stopping
                 self._checkpoint(num_epoch)
-                if self.early_stopping:
+                if early_stopping:
                     best_epoch = recorder['valid_score'].index(min(recorder['valid_score'])) + 1
                     if best_epoch != num_epoch:
                         error_rise_count += 1
-                        if error_rise_count >= self.early_stopping_epoch:
+                        if error_rise_count >= early_stopping_epoch:
                             break
                 else:
                     best_epoch = num_epoch
 
             # print best score
-            if self.verbose in [1, 2]:
+            if verbose in [1, 2]:
                 print(f'best epoch is {best_epoch}, '
                       f' train score is {recorder["train_score"][best_epoch-1]}, '
                       f'valid score is {recorder["valid_score"][best_epoch-1]}')
@@ -206,7 +161,7 @@ class CTR(Model):
 
         # train parameter
         train_param = dict()
-        train_param['verbose'] = 0
+        train_param['verbose'] = 2
         train_param['epoch'] = epoch
         train_param['retrain'] = False
         train_param['early_stopping'] = early_stopping
@@ -225,7 +180,7 @@ class CTR(Model):
             best_epoch = self.modelinfo['start_epoch'] - 1
             best_score = self.modelinfo['recorder']['valid_score'][best_epoch - 1]
             score_list.append(best_score)
-            shutil.rmtree('.checkpoint')
+            # shutil.rmtree('.checkpoint')
             result_dict['history'][f'fold{fold}'] = self.modelinfo['recorder']
 
             if verbose is True:

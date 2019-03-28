@@ -36,13 +36,13 @@ from time import time
 class LoadData(object):
 
     def load_param(self,
-                   trainpath,
-                   testpath,
                    target_type,
                    targetcol,
                    delimiter,
                    numerical_col,
                    cols, discrete_col, multi_dis_col, uselesscol,
+                   trainpath=None,
+                   testpath=None,
                    split_percentage=100,
                    batch_size=64,):
 
@@ -90,7 +90,7 @@ class LoadData(object):
         self.seed = seed
 
     def _preload(self):
-        for _type in ['train', 'test']:
+        for _type in [i for i in ['train', 'test'] if self.datainfo[i]['path'] is not None]:
 
             with open(self.datainfo[_type]['path']) as file:
                 for line in file:
@@ -141,7 +141,7 @@ class LoadData(object):
                 field_index = self.usecol.index(field)
                 self.idx.append([filelen, field_index, 0])
                 self.x_idx.append(self.ledict[field][field] + self.field_start[field])
-                self.x_val.append(line[i])
+                self.x_val.append(float(line[i]))
 
             elif field in self.discrete_col:
                 field_index = self.usecol.index(field)
@@ -170,7 +170,7 @@ class LoadData(object):
                     target_array[self.targetdict[line[i]]] = 1
                     self.y.append(target_array)
                 else:
-                    self.y.append([line[i]])
+                    self.y.append([float(line[i])])
 
             else:
                 pass
@@ -213,7 +213,7 @@ class LoadData(object):
                     self._col_transform(batch_idx, line, _type)
                     batch_idx += 1
 
-                if (batch_idx == self.batch_size) or (size == self.datainfo[_type]['len']):
+                if (batch_idx == self.batch_size) or ((size == self.datainfo[_type]['len']) & (batch_idx != 0)):
                     array_size = [batch_idx, len(self.usecol), self.maxlen]
                     idx_array = np.zeros(array_size, dtype=int)
                     val_array = np.zeros(array_size, dtype=float)

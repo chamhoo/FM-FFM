@@ -20,5 +20,8 @@ FFM/__pycache__/
 # pyc file
 *.pyc
 
-#Mac config file
+# Mac config file
 .DS_Store
+
+# Tempile file
+test.py
