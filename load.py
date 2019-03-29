@@ -27,10 +27,11 @@ the delimiter must be different from the multi-valued discrete field.
 
 author: leechh
 """
-
-
-import numpy as np
 from time import time
+import numpy as np
+from queue import Queue
+from collections import deque
+from multiprocessing import Pool, cpu_count
 
 
 class LoadData(object):
@@ -66,13 +67,6 @@ class LoadData(object):
         self.field_start = dict()
         self.num_feature = 0
         self.target_nunique = 0
-        self.random_cate = []
-
-        self.idx = []
-        self.x_idx = []
-        self.x_val = []
-        self.y = []
-        self.maxlen = 1
 
         testcols = cols.copy()
         testcols.remove(self.targetcol)
@@ -116,7 +110,7 @@ class LoadData(object):
                                     self.ledict[field][i] = self.fieldlen[field]
                                     self.fieldlen[field] += 1
 
-                        elif field is self.targetcol:
+                        elif field in self.targetcol:
                             if self.target_type == 'discrete':
                                 isexit = self.targetdict.get(line[idx], False)
                                 if isexit is False:
@@ -133,47 +127,50 @@ class LoadData(object):
             self.num_feature += value
             i += value
 
-    def _col_transform(self, filelen, line, subtype):
-        for i in range(len(line)):
-            field = self.datainfo[subtype]['cols'][i]
+    def _col_transform(self, q, filelen, line, datainfo):
+        # prepare
+        line = line.strip().split(self.delimiter['field'])
+
+        # convert line
+        for i, unit in enumerate(line):
+            field = datainfo['cols'][i]
 
             if field in self.numerical_col:
                 field_index = self.usecol.index(field)
-                self.idx.append([filelen, field_index, 0])
-                self.x_idx.append(self.ledict[field][field] + self.field_start[field])
-                self.x_val.append(float(line[i]))
+                q['idx'].append([filelen, field_index, 0])
+                q['x_idx'].append(self.ledict[field][field] + self.field_start[field])
+                q['x_val'].append(float(unit))
 
             elif field in self.discrete_col:
                 field_index = self.usecol.index(field)
-                self.idx.append([filelen, field_index, 0])
-                self.x_idx.append(self.ledict[field][line[i]] + self.field_start[field])
-                self.x_val.append(1)
+                q['idx'].append([filelen, field_index, 0])
+                q['x_idx'].append(self.ledict[field][unit] + self.field_start[field])
+                q['x_val'].append(1)
 
             elif field in self.multi_dis_col:
                 num = 0
                 field_index = self.usecol.index(field)
                 field_keys = self.ledict[field].keys()
                 multi_count = dict(zip(field_keys, np.zeros(len(field_keys))))
-                for sub in line[i].replace(' ', '').split(self.delimiter['multi']):
+                for sub in unit.replace(' ', '').split(self.delimiter['multi']):
                     multi_count[sub] += 1
                 for keys, value in multi_count.items():
                     if value != 0:
-                        self.idx.append([filelen, field_index, num])
-                        self.x_idx.append(self.ledict[field][keys] + self.field_start[field])
-                        self.x_val.append(value)
+                        q['idx'].append([filelen, field_index, num])
+                        q['x_idx'].append(self.ledict[field][keys] + self.field_start[field])
+                        q['x_val'].append(value)
                         num += 1
-                self.maxlen = max(num, self.maxlen)
+                q['maxlen'].append(num)
 
             elif field in self.targetcol:
                 if self.target_type == 'discrete':
                     target_array = np.zeros(self.target_nunique)
-                    target_array[self.targetdict[line[i]]] = 1
-                    self.y.append(target_array)
+                    target_array[self.targetdict[unit]] = 1
+                    q['y'].append(target_array)
+                    q['y_idx'].append(filelen)
                 else:
-                    self.y.append([float(line[i])])
-
-            else:
-                pass
+                    q['y'].append([float(unit)])
+                    q['y_idx'].append(filelen)
 
     def _pseudo_random(self, a, b, isbool):
         """
@@ -182,7 +179,7 @@ class LoadData(object):
         """
         m = 2**32
         seed = self.seed
-        for i in range(m):
+        while True:
             nextseed = (a*seed + b) % m
             if isbool:
                 yield (self.split_percentage / 100) > (nextseed / m)
@@ -190,50 +187,84 @@ class LoadData(object):
                 yield nextseed
             seed = nextseed
 
+    def _input_generator(self, dataset_type):
+        size, batch_size, chunk = 0, 0, []
+        split = self._pseudo_random(214013, 2531011, True)
 
-    def data_generator(self, dataset_type):
+        # Choose the appropriate file path
+        if dataset_type in ['train', 'valid']:
+            datainfo = self.datainfo['train']
+        else:
+            datainfo = self.datainfo['test']
+
+        with open(datainfo['path']) as file:
+            for line in file:
+                size += 1
+                if ((dataset_type == 'train') == next(split)) or (dataset_type is 'test'):
+                    chunk.append(line)
+                    batch_size += 1
+                if (batch_size == self.batch_size) or ((size == datainfo['len']) & (batch_size != 0)):
+                    yield chunk, batch_size, datainfo
+                    batch_size, chunk = 0, []
+
+    def data_generator(self, dataset_type, numpool=-1):
         """
         :param dataset_type: 'train', 'valid' or 'test'
         :return: a dataset generator of this data type
         """
-        batch_idx = 0
-        size = 0
-        split = self._pseudo_random(214013, 2531011, True)
+        # assert
+        assert dataset_type in ['train', 'valid', 'test'], 'dataset_type is out of the range'
+        assert type(numpool) is int, 'the type of numpool is int'
 
-        if dataset_type in ['train', 'valid']:
-            _type = 'train'
-        else:
-            _type = 'test'
+        # numpool
+        if numpool < 1:
+            numpool = cpu_count()
 
-        with open(self.datainfo[_type]['path']) as file:
-            for line in file:
-                size += 1
-                if ((dataset_type == 'train') == next(split)) or (dataset_type is 'test'):
-                    line = line.strip().split(self.delimiter['field'])
-                    self._col_transform(batch_idx, line, _type)
-                    batch_idx += 1
+        # empty resultdic
+        resultdic = dict(zip(
+            ['y_idx', 'idx', 'x_idx', 'x_val', 'y', 'maxlen'],
+            [deque(), deque(), deque(), deque(), deque(), deque()]))
 
-                if (batch_idx == self.batch_size) or ((size == self.datainfo[_type]['len']) & (batch_idx != 0)):
-                    array_size = [batch_idx, len(self.usecol), self.maxlen]
-                    idx_array = np.zeros(array_size, dtype=int)
-                    val_array = np.zeros(array_size, dtype=float)
+        for chunk, batch_size, datainfo in self._input_generator(dataset_type):
+            # convert chunk
+            t = time()
+            for i, line in enumerate(chunk):
+                self._col_transform(resultdic, i, line, datainfo)
+            print(time()-t)
+            # find maxlen
+            maxlen = 1
+            while True:
+                try:
+                    maxlen = max(maxlen, resultdic['maxlen'].pop())
+                except IndexError:
+                    break
 
-                    for i, [x, y, z] in enumerate(self.idx):
-                        idx_array[x, y, z] = self.x_idx[i]
-                        val_array[x, y, z] = self.x_val[i]
+            # construct output
+            array_size = [batch_size, len(self.usecol), maxlen]
+            idx_array = np.zeros(array_size, dtype=int)
+            val_array = np.zeros(array_size, dtype=float)
+            y_list = [0 for i in range(batch_size)]
 
-                    if _type == 'train':
-                        yield idx_array, val_array, np.array(self.y), batch_idx
-                    else:
-                        yield idx_array, val_array, batch_idx
+            while True:
+                try:
+                    x, y, z = resultdic['idx'].popleft()
+                    idx_array[x, y, z] = resultdic['x_idx'].popleft()
+                    val_array[x, y, z] = resultdic['x_val'].popleft()
+                except IndexError:
+                    break
 
-                    del idx_array, val_array
-                    self.idx.clear()
-                    self.x_idx.clear()
-                    self.x_val.clear()
-                    self.y.clear()
-                    self.maxlen = 1
-                    batch_idx = 0
+            while True:
+                try:
+                    y_list[resultdic['y_idx'].popleft()] = resultdic['y'].popleft()
+                except IndexError:
+                    break
+
+            if y_list[0] == 0:
+                yield idx_array, val_array, np.array(y_list), batch_size
+            else:
+                yield idx_array, val_array, batch_size
+
+
 
 
 
