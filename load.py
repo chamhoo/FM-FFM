@@ -29,9 +29,8 @@ author: leechh
 """
 from time import time
 import numpy as np
-from queue import Queue
 from collections import deque
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, cpu_count, Process
 
 
 class LoadData(object):
@@ -227,16 +226,15 @@ class LoadData(object):
 
         for chunk, batch_size, datainfo in self._input_generator(dataset_type):
             # convert chunk
-            t = time()
             for i, line in enumerate(chunk):
                 self._col_transform(resultdic, i, line, datainfo)
-            print(time()-t)
+
             # find maxlen
             maxlen = 1
             while True:
                 try:
                     maxlen = max(maxlen, resultdic['maxlen'].pop())
-                except IndexError:
+                except:
                     break
 
             # construct output
@@ -250,13 +248,13 @@ class LoadData(object):
                     x, y, z = resultdic['idx'].popleft()
                     idx_array[x, y, z] = resultdic['x_idx'].popleft()
                     val_array[x, y, z] = resultdic['x_val'].popleft()
-                except IndexError:
+                except:
                     break
 
             while True:
                 try:
                     y_list[resultdic['y_idx'].popleft()] = resultdic['y'].popleft()
-                except IndexError:
+                except:
                     break
 
             if y_list[0] == 0:
