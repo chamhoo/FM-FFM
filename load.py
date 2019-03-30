@@ -136,16 +136,18 @@ class LoadData(object):
 
             if field in self.numerical_col:
                 field_index = self.usecol.index(field)
-                q['idx'].append([filelen, field_index, 0])
-                q['x_idx'].append(self.ledict[field][field] + self.field_start[field])
-                q['x_val'].append(float(unit))
-
+                q['x'].append([
+                    [filelen, field_index, 0],
+                    self.ledict[field][field] + self.field_start[field],
+                    float(unit)
+                ])
             elif field in self.discrete_col:
                 field_index = self.usecol.index(field)
-                q['idx'].append([filelen, field_index, 0])
-                q['x_idx'].append(self.ledict[field][unit] + self.field_start[field])
-                q['x_val'].append(1)
-
+                q['x'].append([
+                    [filelen, field_index, 0],
+                    self.ledict[field][unit] + self.field_start[field],
+                    1
+                ])
             elif field in self.multi_dis_col:
                 num = 0
                 field_index = self.usecol.index(field)
@@ -155,21 +157,20 @@ class LoadData(object):
                     multi_count[sub] += 1
                 for keys, value in multi_count.items():
                     if value != 0:
-                        q['idx'].append([filelen, field_index, num])
-                        q['x_idx'].append(self.ledict[field][keys] + self.field_start[field])
-                        q['x_val'].append(value)
-                        num += 1
-                q['maxlen'].append(num)
+                        q['x'].append([
+                            [filelen, field_index, num],
+                            self.ledict[field][keys] + self.field_start[field],
+                            value
+                        ])
+                q['deep'].append(num)
 
             elif field in self.targetcol:
                 if self.target_type == 'discrete':
                     target_array = np.zeros(self.target_nunique)
                     target_array[self.targetdict[unit]] = 1
-                    q['y'].append(target_array)
-                    q['y_idx'].append(filelen)
+                    q['y'].append([filelen, target_array])
                 else:
-                    q['y'].append([float(unit)])
-                    q['y_idx'].append(filelen)
+                    q['y'].append([filelen, [float(unit)]])
 
     def _pseudo_random(self, a, b, isbool):
         """
@@ -206,34 +207,26 @@ class LoadData(object):
                     yield chunk, batch_size, datainfo
                     batch_size, chunk = 0, []
 
-    def data_generator(self, dataset_type, numpool=-1):
+    def data_generator(self, dataset_type):
         """
         :param dataset_type: 'train', 'valid' or 'test'
         :return: a dataset generator of this data type
         """
         # assert
         assert dataset_type in ['train', 'valid', 'test'], 'dataset_type is out of the range'
-        assert type(numpool) is int, 'the type of numpool is int'
-
-        # numpool
-        if numpool < 1:
-            numpool = cpu_count()
 
         # empty resultdic
-        resultdic = dict(zip(
-            ['y_idx', 'idx', 'x_idx', 'x_val', 'y', 'maxlen'],
-            [deque(), deque(), deque(), deque(), deque(), deque()]))
+        resultdic = dict(zip(['x', 'y', 'deep'], [deque(), deque(), deque()]))
 
         for chunk, batch_size, datainfo in self._input_generator(dataset_type):
             # convert chunk
             for i, line in enumerate(chunk):
                 self._col_transform(resultdic, i, line, datainfo)
-
             # find maxlen
             maxlen = 1
             while True:
                 try:
-                    maxlen = max(maxlen, resultdic['maxlen'].pop())
+                    maxlen = max(maxlen, resultdic['deep'].pop())
                 except:
                     break
 
@@ -245,19 +238,20 @@ class LoadData(object):
 
             while True:
                 try:
-                    x, y, z = resultdic['idx'].popleft()
-                    idx_array[x, y, z] = resultdic['x_idx'].popleft()
-                    val_array[x, y, z] = resultdic['x_val'].popleft()
+                    [[x, y, z], idx, val] = resultdic['x'].popleft()
+                    idx_array[x, y, z] = idx
+                    val_array[x, y, z] = val
                 except:
                     break
 
             while True:
                 try:
-                    y_list[resultdic['y_idx'].popleft()] = resultdic['y'].popleft()
+                    [idx, val] = resultdic['y'].popleft()
+                    y_list[idx] = val
                 except:
                     break
 
-            if y_list[0] == 0:
+            if y_list[0] != 0:
                 yield idx_array, val_array, np.array(y_list), batch_size
             else:
                 yield idx_array, val_array, batch_size

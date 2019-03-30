@@ -48,13 +48,13 @@ if __name__ == '__main__':
 
     ctr = CTR()
     ctr.load_param(**load_params)
-    a = 0
     t = time()
+    a = 0
     for i in ctr.data_generator('train'):
         a += 1
-    print(time() - t)
-    """
-    ctr.FM(**fm_params)
+    print(time()-t)
+"""
+    ctr.linear_regression(**linear_params)
     ctr.cv(**cv_params)
     ctr = AutoTuning()
     ctr.load_param(**load_params)
